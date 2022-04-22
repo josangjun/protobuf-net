@@ -157,7 +157,11 @@ namespace ProtoBuf.Internal
         public static readonly IValueChecker<T> ValueChecker =
             SerializerCache<PrimaryTypeProvider>.InstanceField as IValueChecker<T>
             ?? ReferenceValueChecker.Instance as IValueChecker<T>
+#if true//AOT_COMPILE
+            ?? StructValueChecker<T>.Instance;
+#else
             ?? (IValueChecker<T>)TypeHelper.GetValueTypeChecker(typeof(T));
+#endif
 
         public static readonly bool CanBePacked = !CanBeNull && TypeHelper.CanBePacked(typeof(T));
 
@@ -189,6 +193,19 @@ namespace ProtoBuf.Internal
         /// </summary>
         bool IValueChecker<object>.IsNull(object value) => value is null;
     }
+
+#if true //AOT_COMPILE
+    internal sealed class StructValueChecker<T> : IValueChecker<T>
+    {
+        private StructValueChecker() {
+            isNullable = typeof(T).IsGenericType && typeof(T).GetGenericTypeDefinition() == typeof(Nullable<>);
+        }
+        public static readonly StructValueChecker<T> Instance = new StructValueChecker<T>();
+        private bool isNullable;
+        bool IValueChecker<T>.HasNonTrivialValue(T value) => isNullable ? value != null : true;
+        bool IValueChecker<T>.IsNull(T value) => isNullable ? value == null : false;
+    }
+#else
     internal sealed class StructValueChecker<T> : IValueChecker<T?>, IValueChecker<T>
         where T : struct
     {
@@ -199,4 +216,5 @@ namespace ProtoBuf.Internal
         bool IValueChecker<T>.HasNonTrivialValue(T value) => true;
         bool IValueChecker<T>.IsNull(T value) => false;
     }
+#endif
 }

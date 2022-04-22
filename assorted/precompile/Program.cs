@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using ProtoBuf.Meta;
 
@@ -125,6 +126,7 @@ namespace ProtoBuf.Precompile
             string imageRuntimeVersion = null;
             try
             {
+                /*
                 using (var uni = new IKVM.Reflection.Universe())
                 {
                     uni.AssemblyResolve += (s, a) => ((IKVM.Reflection.Universe)s).CreateMissingAssembly(a.Name);
@@ -176,6 +178,7 @@ namespace ProtoBuf.Precompile
                         }
                     }
                 }
+                */
             }
             catch (Exception ex) {
                 // not really fussed; we could have multiple inputs to try, and the user
@@ -312,8 +315,8 @@ namespace ProtoBuf.Precompile
         public bool Execute()
         {
             // model to work with
-            var model = TypeModel.Create();
-
+            var model = RuntimeTypeModel.Create();
+            /*
             model.Universe.AssemblyResolve += (sender, args) =>
             {
                 string nameOnly = args.Name.Split(',')[0];
@@ -334,29 +337,37 @@ namespace ProtoBuf.Precompile
 
                 throw new InvalidOperationException("All assemblies must be resolved explicity; did not resolve: " + args.Name);
             };
+            */
+            /*
             bool allGood = true;
-            var mscorlib = ResolveNewAssembly(model.Universe, "mscorlib.dll");
+            
+            var mscorlib = ResolveNewAssembly("mscorlib.dll");
             if (mscorlib == null)
             {
                 Console.Error.WriteLine("mscorlib.dll not found!");
                 allGood = false;
             }
-            ResolveNewAssembly(model.Universe, "System.dll"); // not so worried about whether that one exists...
-            if (ResolveNewAssembly(model.Universe, "protobuf-net.dll") == null)
+            
+            ResolveNewAssembly("System.dll"); // not so worried about whether that one exists...
+            if (ResolveNewAssembly("protobuf-net.dll") == null)
             {
                 Console.Error.WriteLine("protobuf-net.dll not found!");
                 allGood = false;
-            }
+            }            
             if (!allGood) return false;
-            var assemblies = new List<IKVM.Reflection.Assembly>();
+            */
+            var assemblies = new List<Assembly>();
             MetaType metaType = null;
             foreach (var file in inputs)
             {
-                assemblies.Add(model.Load(file));
+                var path = $"{System.Environment.CurrentDirectory}/{file}";
+                Console.WriteLine($"Assembly.LoadFrom:{path}");
+                assemblies.Add(Assembly.LoadFrom(path));
             }
             // scan for obvious protobuf types
-            var attributeType = model.Universe.GetType("System.Attribute, mscorlib");
-            var toAdd = new List<IKVM.Reflection.Type>();
+
+            var attributeType = System.Type.GetType("System.Attribute, mscorlib");
+            var toAdd = new List<System.Type>();
             foreach (var asm in assemblies)
             {
                 foreach (var type in asm.GetTypes())
@@ -364,9 +375,9 @@ namespace ProtoBuf.Precompile
                     bool add = false;
                     if (!(type.IsClass || type.IsValueType)) continue;
 
-                    foreach (var attrib in type.__GetCustomAttributes(attributeType, true))
+                    foreach (object attrib in type.GetCustomAttributes(attributeType, true))
                     {
-                        string name = attrib.Constructor.DeclaringType.FullName;
+                        string name = attrib.GetType().FullName;
                         switch(name) 
                         {
                             case "ProtoBuf.ProtoContractAttribute":
@@ -386,7 +397,7 @@ namespace ProtoBuf.Precompile
             }
 
             // add everything we explicitly know about
-            toAdd.Sort((x, y) => string.Compare(x.FullName, y.FullName));            
+            toAdd.Sort((x, y) => string.Compare(x.FullName, y.FullName));
             foreach (var type in toAdd)
             {
                 Console.WriteLine("Adding " + type.FullName + "...");
@@ -394,8 +405,8 @@ namespace ProtoBuf.Precompile
                 if (metaType == null) metaType = tmp; // use this as the template for the framework version
             }
             // add everything else we can find
-            model.Cascade();
-            var inferred = new List<IKVM.Reflection.Type>();
+            
+            var inferred = new List<System.Type>();
             foreach (MetaType type in model.GetTypes())
             {
                 if(!toAdd.Contains(type.Type)) inferred.Add(type.Type);
@@ -406,23 +417,24 @@ namespace ProtoBuf.Precompile
                 Console.WriteLine("Adding " + type.FullName + "...");
             }
 
-            
             // configure the output file/serializer name, and borrow the framework particulars from
             // the type we loaded
             var options = new RuntimeTypeModel.CompilerOptions
             {
                 TypeName = TypeName,
                 OutputPath = AssemblyName,
-                ImageRuntimeVersion = mscorlib.ImageRuntimeVersion,
+                ImageRuntimeVersion = "4.0.0",
                 MetaDataVersion = 0x20000, // use .NET 2 onwards
+                /*
                 KeyContainer = KeyContainer,
                 KeyFile = KeyFile,
                 PublicKey = PublicKey
+                */
             };
-            if (mscorlib.ImageRuntimeVersion == "v1.1.4322")
-            { // .NET 1.1-style
-                options.MetaDataVersion = 0x10000;
-            }
+            //if (mscorlib.ImageRuntimeVersion == "v1.1.4322")
+            //{ // .NET 1.1-style
+            //    options.MetaDataVersion = 0x10000;
+            //}
             if (metaType != null)
             {
                 options.SetFrameworkOptions(metaType);
@@ -437,11 +449,13 @@ namespace ProtoBuf.Precompile
 
         }
         
-        private IKVM.Reflection.Assembly ResolveNewAssembly(IKVM.Reflection.Universe uni, string fileName)
+        private Assembly ResolveNewAssembly(string fileName)
         {
+            
             foreach (var match in ProbeForFiles(fileName))
             {
-                var asm = uni.LoadFile(match);
+                var path = $"{System.Environment.CurrentDirectory}/{match}";
+                var asm = Assembly.LoadFile(path);
                 if (asm != null)
                 {
                     Console.WriteLine("Resolved " + match);
